@@ -1,5 +1,6 @@
+import { BOARD_LABELS } from "../shared/boards";
 import type { BoardsResponse } from "../shared/types";
-import { ingestDailyBoard, latestDailyDate, readDailyBoard } from "./daily";
+import { emptyBoards, ingestBoards, latestEditionDate, readBoards } from "./boards";
 
 const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -18,7 +19,7 @@ async function refresh(request: Request, env: Cloudflare.Env): Promise<Response>
     return json({ error: "UNAUTHORIZED" }, 401);
   }
 
-  const result = await ingestDailyBoard(env.DB);
+  const result = await ingestBoards(env.DB);
   if (!result.date) {
     return json({ error: "RSC_PAYLOAD_MISSING", warnings: result.warnings }, 502);
   }
@@ -28,9 +29,12 @@ async function refresh(request: Request, env: Cloudflare.Env): Promise<Response>
 async function boards(url: URL, env: Cloudflare.Env): Promise<Response> {
   const requested = url.searchParams.get("date");
   const date =
-    requested && DATE_PARAM.test(requested) ? requested : await latestDailyDate(env.DB);
-  const daily = date ? await readDailyBoard(env.DB, date) : [];
-  const body: BoardsResponse = { date, boards: { daily } };
+    requested && DATE_PARAM.test(requested) ? requested : await latestEditionDate(env.DB);
+  const body: BoardsResponse = {
+    date,
+    labels: BOARD_LABELS,
+    boards: date ? await readBoards(env.DB, date) : emptyBoards(),
+  };
   return json(body);
 }
 

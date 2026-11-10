@@ -1,3 +1,5 @@
+import type { BoardSlug } from "./boards";
+
 export interface BoardEntryResponse {
   rank: number;
   repo: string;
@@ -11,9 +13,10 @@ export interface BoardEntryResponse {
   tags: string[];
 }
 
+export type BoardsBySlug = Record<BoardSlug, BoardEntryResponse[]>;
+
 export interface BoardsResponse {
   date: string | null;
-  boards: {
-    daily: BoardEntryResponse[];
-  };
+  labels: Record<BoardSlug, string>;
+  boards: BoardsBySlug;
 }

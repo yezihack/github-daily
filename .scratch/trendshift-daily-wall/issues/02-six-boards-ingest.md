@@ -6,6 +6,8 @@
 
 **Status:** 可自动开发
 
+> _与 ADR-0001、SPEC「错误处理与降级」及验收标准 11 矛盾 —— 本工单把「任一载荷缺失」暂定为该榜为空并留警告，没有 `RSC: 1` 重试、沿用上一**期次**与新鲜度状态。这些降级口径统一在工单 10 收口；按 tracer-bullet 顺序，02 先打通六榜采集与归一化，不提前实现 10 的能力。_
+
 - [ ] 一次采集返回六个**榜单**、每榜 25 条（共 150 条）；中文名称与顺序固定：日榜 / 周榜 / 月榜 / 年榜 / 当日提及榜 / GitHub 趋势历史榜
 - [ ] 日/周/月/年榜从 `initialData` 取数，趋势历史榜从 `repositories` 取数，当日提及榜从 `initialMentions` 取数；任一缺失则该榜为空并留下警告
 - [ ] 每条含 rank、stars、forks、gained 或 featured、语言与标签；趋势历史榜以 watchers 作 stars、featured_count 作 featured；当日提及榜无 gained

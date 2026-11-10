@@ -179,3 +179,38 @@ h1 {
     padding-top: 0;
   }
 }
+
+.board-section {
+  margin-top: 36px;
+}
+
+.board-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #242c38;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.board-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: #8b949e;
+  letter-spacing: 0;
+}
+
+.board-empty {
+  margin: 0;
+  padding: 24px;
+  border: 1px dashed #2d3644;
+  border-radius: 12px;
+  color: #8b949e;
+  font-size: 14px;
+}
+
+.metrics .featured {
+  color: #d2a8ff;
+}

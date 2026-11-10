@@ -2,16 +2,21 @@ import { SELF } from "cloudflare:test";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import type { BoardsResponse } from "../src/shared/types";
-import { buildDailyRscHtml, makeDailyRow } from "./fixtures/daily-rsc";
+import { boardPages } from "./fixtures/boards-rsc";
+import { makeDailyRow } from "./fixtures/daily-rsc";
 import { network } from "./network";
 
 const BASE = "https://example.com";
 const AUTH = { Authorization: "Bearer test-admin-token" };
 
+function servePages(pages: Record<string, string>): void {
+  for (const [url, html] of Object.entries(pages)) {
+    network.use(http.get(url, () => HttpResponse.html(html)));
+  }
+}
+
 function serveRsc(rows: Record<string, unknown>[]): void {
-  network.use(
-    http.get("https://trendshift.io/", () => HttpResponse.html(buildDailyRscHtml(rows))),
-  );
+  servePages(boardPages({ overrides: { daily: rows } }));
 }
 
 async function refresh(): Promise<Response> {
@@ -45,7 +50,7 @@ describe("采集边界", () => {
     expect(body.boards.daily[0].htmlUrl).toBe("https://github.com/owner2/repo2");
   });
 
-  it("大小写写法不同的同一仓库只产生一条记录与一个地址", async () => {
+  it("大小写写法不同的同一仓库标识只归一化为一个仓库", async () => {
     serveRsc([
       makeDailyRow(0, { date: "2026-11-06T00:00:00Z", full_name: "OpenAI/Codex" }),
       makeDailyRow(1, { date: "2026-11-06T00:00:00Z", full_name: "openai/codex" }),

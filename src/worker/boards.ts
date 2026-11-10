@@ -201,6 +201,17 @@ function boardEntryInsert(db: D1Database, board: BoardSlug, date: string, entry:
     );
 }
 
+function editionUpsert(db: D1Database, board: BoardSlug, date: string, now: string) {
+  return db
+    .prepare(
+      `INSERT INTO editions (board, date, collected_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(board, date) DO UPDATE SET
+         collected_at = excluded.collected_at`,
+    )
+    .bind(board, date, now);
+}
+
 export async function ingestBoards(db: D1Database): Promise<IngestResult> {
   const fetched: FetchedBoard[] = await Promise.all(
     BOARDS.map(async (meta) => {
@@ -237,6 +248,7 @@ export async function ingestBoards(db: D1Database): Promise<IngestResult> {
       db
         .prepare("DELETE FROM board_entries WHERE board = ? AND date = ?")
         .bind(board.meta.slug, date),
+      editionUpsert(db, board.meta.slug, date, now),
     ];
     for (const entry of normalized.entries) {
       statements.push(repositoryUpsert(db, entry, now));
@@ -249,11 +261,21 @@ export async function ingestBoards(db: D1Database): Promise<IngestResult> {
   return { date, count, warnings };
 }
 
-export async function latestEditionDate(db: D1Database): Promise<string | null> {
+export async function listEditionDates(db: D1Database): Promise<string[]> {
   const result = await db
-    .prepare("SELECT MAX(date) AS date FROM board_entries")
-    .first<{ date: string | null }>();
-  return result?.date ?? null;
+    .prepare(
+      `SELECT DISTINCT date FROM editions
+       UNION
+       SELECT DISTINCT date FROM board_entries
+       ORDER BY date DESC`,
+    )
+    .all<{ date: string }>();
+  return result.results.map((row) => row.date);
+}
+
+export async function latestEditionDate(db: D1Database): Promise<string | null> {
+  const dates = await listEditionDates(db);
+  return dates[0] ?? null;
 }
 
 export function emptyBoards(): BoardsBySlug {

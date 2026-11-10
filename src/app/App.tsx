@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type ChangeEvent, type CSSProperties } from "react";
 import { BOARD_ACCENTS, BOARD_LABELS, BOARD_ORDER } from "../shared/boards";
 import type { BoardEntryResponse, BoardsResponse } from "../shared/types";
 
@@ -88,32 +88,39 @@ function BoardCard({
 export function App() {
   const [state, setState] = useState<LoadState>("loading");
   const [data, setData] = useState<BoardsResponse | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
+  async function load(date?: string, signal?: AbortSignal): Promise<void> {
+    const response = await fetch(date ? `/api/boards?date=${date}` : "/api/boards", {
+      signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = (await response.json()) as BoardsResponse;
+    setData(body);
+    setSwitchError(null);
+    setState("ready");
+  }
 
   useEffect(() => {
     const controller = new AbortController();
-
-    fetch("/api/boards", { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return (await response.json()) as BoardsResponse;
-      })
-      .then((body) => {
-        setData(body);
-        setState("ready");
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setState("error");
-      });
-
+    load(undefined, controller.signal).catch((error: unknown) => {
+      if (error instanceof Error && error.name === "AbortError") return;
+      setState("error");
+    });
     return () => controller.abort();
   }, []);
+
+  function selectEdition(event: ChangeEvent<HTMLSelectElement>): void {
+    load(event.target.value).catch(() => setSwitchError("切换期次失败，请重试。"));
+  }
 
   const labels = data?.labels ?? BOARD_LABELS;
   const accents = data?.accents ?? BOARD_ACCENTS;
   const total = data
     ? BOARD_ORDER.reduce((sum, slug) => sum + data.boards[slug].length, 0)
     : 0;
+  const selectedDate =
+    data?.date && data.dates.includes(data.date) ? data.date : data?.dates[0];
 
   return (
     <main className="app">
@@ -124,10 +131,25 @@ export function App() {
         </div>
         <div className="topbar__slots">
           <div className="topbar__slot">
-            <span className="topbar__label">期次</span>
-            <span className="topbar__value">
-              {data?.date ? `${data.date} UTC` : "等待首个期次"}
-            </span>
+            <label className="topbar__label" htmlFor="edition-date">
+              期次（UTC）
+            </label>
+            {data && data.dates.length > 0 ? (
+              <select
+                id="edition-date"
+                className="topbar__select"
+                value={selectedDate}
+                onChange={selectEdition}
+              >
+                {data.dates.map((availableDate) => (
+                  <option key={availableDate} value={availableDate}>
+                    {availableDate} UTC
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="topbar__value topbar__value--pending">等待首个期次</span>
+            )}
           </div>
           <div className="topbar__slot">
             <span className="topbar__label">数据状态</span>
@@ -140,6 +162,7 @@ export function App() {
       {state === "error" && (
         <p className="wall__notice wall__notice--error">数据加载失败，请稍后重试。</p>
       )}
+      {switchError && <p className="wall__notice wall__notice--error">{switchError}</p>}
       {state === "ready" && total === 0 && (
         <p className="wall__notice">
           还没有期次数据，部署完成后由运维手动触发一次采集。

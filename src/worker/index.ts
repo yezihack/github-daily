@@ -1,6 +1,12 @@
 import { BOARD_ACCENTS, BOARD_LABELS } from "../shared/boards";
 import type { BoardsResponse } from "../shared/types";
-import { emptyBoards, ingestBoards, latestEditionDate, readBoards } from "./boards";
+import {
+  emptyBoards,
+  ingestBoards,
+  latestEditionDate,
+  listEditionDates,
+  readBoards,
+} from "./boards";
 
 const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -28,10 +34,13 @@ async function refresh(request: Request, env: Cloudflare.Env): Promise<Response>
 
 async function boards(url: URL, env: Cloudflare.Env): Promise<Response> {
   const requested = url.searchParams.get("date");
-  const date =
-    requested && DATE_PARAM.test(requested) ? requested : await latestEditionDate(env.DB);
+  if (requested !== null && !DATE_PARAM.test(requested)) {
+    return json({ error: "INVALID_DATE" }, 400);
+  }
+  const date = requested ?? (await latestEditionDate(env.DB));
   const body: BoardsResponse = {
     date,
+    dates: await listEditionDates(env.DB),
     labels: BOARD_LABELS,
     accents: BOARD_ACCENTS,
     boards: date ? await readBoards(env.DB, date) : emptyBoards(),

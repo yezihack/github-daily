@@ -34,6 +34,16 @@ function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function optionalHomepage(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function tagNames(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -80,6 +90,7 @@ function normalizeGrowthRows(rows: unknown[], label: string): NormalizedBoard {
       rank: finiteNumber(item.rank) ?? index + 1,
       repo: repoId,
       htmlUrl: `https://github.com/${repoId}`,
+      homepage: optionalHomepage(item.repository_homepage),
       descEn: optionalText(item.repository_description),
       stars: finiteNumber(item.repository_stars),
       forks: finiteNumber(item.repository_forks),
@@ -107,6 +118,7 @@ function normalizeTrendingRows(rows: unknown[], label: string): NormalizedBoard 
       rank: index + 1,
       repo: repoId,
       htmlUrl: `https://github.com/${repoId}`,
+      homepage: optionalHomepage(item.homepage),
       descEn: optionalText(item.description),
       stars: finiteNumber(item.watchers),
       forks: finiteNumber(item.forks),
@@ -136,6 +148,7 @@ function normalizeMentionRows(rows: unknown[], label: string): NormalizedBoard {
       rank: index + 1,
       repo: repoId,
       htmlUrl: `https://github.com/${repoId}`,
+      homepage: optionalHomepage(item.repository_homepage),
       descEn: optionalText(item.repository_description),
       stars: finiteNumber(item.repository_stars) ?? finiteNumber(item.stars),
       forks: finiteNumber(item.repository_forks) ?? finiteNumber(item.forks),
@@ -170,14 +183,15 @@ function editionDate(boards: FetchedBoard[]): string {
 function repositoryUpsert(db: D1Database, entry: BoardEntryResponse, now: string) {
   return db
     .prepare(
-      `INSERT INTO repositories (id, html_url, description_en, language, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO repositories (id, html_url, homepage, description_en, language, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         homepage = COALESCE(excluded.homepage, repositories.homepage),
          description_en = COALESCE(excluded.description_en, repositories.description_en),
          language = COALESCE(excluded.language, repositories.language),
          updated_at = excluded.updated_at`,
     )
-    .bind(entry.repo, entry.htmlUrl, entry.descEn, entry.language, now, now);
+    .bind(entry.repo, entry.htmlUrl, entry.homepage, entry.descEn, entry.language, now, now);
 }
 
 function boardEntryInsert(db: D1Database, board: BoardSlug, date: string, entry: BoardEntryResponse) {
@@ -289,6 +303,7 @@ interface BoardRow {
   rank: number;
   repo_id: string;
   html_url: string;
+  homepage: string | null;
   description_en: string | null;
   stars: number | null;
   forks: number | null;
@@ -302,7 +317,7 @@ export async function readBoards(db: D1Database, date: string): Promise<BoardsBy
   const boards = emptyBoards();
   const result = await db
     .prepare(
-      `SELECT e.board, e.rank, e.repo_id, r.html_url, r.description_en,
+      `SELECT e.board, e.rank, e.repo_id, r.html_url, r.homepage, r.description_en,
               e.stars, e.forks, e.gained, e.featured, e.language, e.tags
        FROM board_entries e
        JOIN repositories r ON r.id = e.repo_id
@@ -319,6 +334,7 @@ export async function readBoards(db: D1Database, date: string): Promise<BoardsBy
       rank: row.rank,
       repo: row.repo_id,
       htmlUrl: row.html_url,
+      homepage: row.homepage,
       descEn: row.description_en,
       stars: row.stars,
       forks: row.forks,

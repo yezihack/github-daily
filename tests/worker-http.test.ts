@@ -32,6 +32,7 @@ describe("日榜端到端", () => {
       rank: 1,
       repo: "owner0/repo0",
       htmlUrl: "https://github.com/owner0/repo0",
+      homepage: null,
       descEn: "English description for repo 0.",
       stars: 1000,
       forks: 10,

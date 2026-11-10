@@ -4,6 +4,7 @@ export interface BoardEntryResponse {
   rank: number;
   repo: string;
   htmlUrl: string;
+  homepage: string | null;
   descEn: string | null;
   stars: number | null;
   forks: number | null;

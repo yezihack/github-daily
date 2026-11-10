@@ -1,24 +1,31 @@
-import { useEffect, useState, type ChangeEvent, type CSSProperties } from "react";
+import { useEffect, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent } from "react";
 import { BOARD_ACCENTS, BOARD_LABELS, BOARD_ORDER } from "../shared/boards";
+import { EMPTY_DESCRIPTION, formatMetric, formatRank } from "../shared/format";
 import type { BoardEntryResponse, BoardsResponse } from "../shared/types";
+import { DetailDrawer } from "./Drawer";
 
 type LoadState = "loading" | "ready" | "error";
-
-function formatMetric(value: number | null): string {
-  return value === null ? "—" : value.toLocaleString("en-US");
-}
 
 function BoardCard({
   label,
   accent,
   entries,
   state,
+  onSelect,
 }: {
   label: string;
   accent: string;
   entries: BoardEntryResponse[];
   state: LoadState;
+  onSelect: (entry: BoardEntryResponse, accent: string) => void;
 }) {
+  function onRowKey(event: KeyboardEvent<HTMLLIElement>, entry: BoardEntryResponse): void {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(entry, accent);
+    }
+  }
+
   return (
     <section
       className="card"
@@ -40,19 +47,20 @@ function BoardCard({
         ) : (
           <ol className="board">
             {entries.map((entry) => (
-              <li className="row" key={entry.repo}>
-                <span className="rank">{String(entry.rank).padStart(2, "0")}</span>
+              <li
+                className="row"
+                key={entry.repo}
+                role="button"
+                tabIndex={0}
+                aria-label={`查看 ${entry.repo} 详情`}
+                onClick={() => onSelect(entry, accent)}
+                onKeyDown={(event) => onRowKey(event, entry)}
+              >
+                <span className="rank">{formatRank(entry.rank)}</span>
 
                 <div className="row__body">
-                  <a
-                    className="repo"
-                    href={entry.htmlUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {entry.repo}
-                  </a>
-                  <p className="desc">{entry.descEn ?? "暂无英文简介"}</p>
+                  <span className="repo">{entry.repo}</span>
+                  <p className="desc">{entry.descEn ?? EMPTY_DESCRIPTION}</p>
                   <div className="tags">
                     {entry.language && <span className="tag language">{entry.language}</span>}
                     {entry.tags.map((tag) => (
@@ -89,6 +97,9 @@ export function App() {
   const [state, setState] = useState<LoadState>("loading");
   const [data, setData] = useState<BoardsResponse | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ entry: BoardEntryResponse; accent: string } | null>(
+    null,
+  );
 
   async function load(date?: string, signal?: AbortSignal): Promise<void> {
     const response = await fetch(date ? `/api/boards?date=${date}` : "/api/boards", {
@@ -177,9 +188,19 @@ export function App() {
             accent={accents[slug]}
             entries={data?.boards[slug] ?? []}
             state={state}
+            onSelect={(entry, accent) => setSelected({ entry, accent })}
           />
         ))}
       </div>
+
+      {selected && (
+        <DetailDrawer
+          entry={selected.entry}
+          editionDate={selectedDate ?? ""}
+          accent={selected.accent}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </main>
   );
 }

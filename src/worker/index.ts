@@ -1,4 +1,4 @@
-import { BOARD_LABELS } from "../shared/boards";
+import { BOARD_ACCENTS, BOARD_LABELS } from "../shared/boards";
 import type { BoardsResponse } from "../shared/types";
 import { emptyBoards, ingestBoards, latestEditionDate, readBoards } from "./boards";
 
@@ -33,6 +33,7 @@ async function boards(url: URL, env: Cloudflare.Env): Promise<Response> {
   const body: BoardsResponse = {
     date,
     labels: BOARD_LABELS,
+    accents: BOARD_ACCENTS,
     boards: date ? await readBoards(env.DB, date) : emptyBoards(),
   };
   return json(body);

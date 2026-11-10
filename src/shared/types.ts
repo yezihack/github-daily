@@ -18,5 +18,6 @@ export type BoardsBySlug = Record<BoardSlug, BoardEntryResponse[]>;
 export interface BoardsResponse {
   date: string | null;
   labels: Record<BoardSlug, string>;
+  accents: Record<BoardSlug, string>;
   boards: BoardsBySlug;
 }

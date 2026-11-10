@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { BOARD_ORDER } from "../shared/boards";
+import { useEffect, useState, type CSSProperties } from "react";
+import { BOARD_ACCENTS, BOARD_LABELS, BOARD_ORDER } from "../shared/boards";
 import type { BoardEntryResponse, BoardsResponse } from "../shared/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -8,66 +8,79 @@ function formatMetric(value: number | null): string {
   return value === null ? "—" : value.toLocaleString("en-US");
 }
 
-function BoardSection({
+function BoardCard({
   label,
+  accent,
   entries,
+  state,
 }: {
   label: string;
+  accent: string;
   entries: BoardEntryResponse[];
+  state: LoadState;
 }) {
   return (
-    <section className="board-section">
-      <h2 className="board-title">
-        {label}
-        <span className="board-count">{entries.length} 条榜单条目</span>
-      </h2>
+    <section
+      className="card"
+      style={{ "--accent": accent } as CSSProperties}
+      aria-label={label}
+    >
+      <header className="card__head">
+        <h2 className="card__title">{label}</h2>
+        <span className="card__count">{entries.length} 条榜单条目</span>
+      </header>
 
-      {entries.length === 0 ? (
-        <p className="board-empty">本期这个榜单没有可展示的榜单条目。</p>
-      ) : (
-        <ol className="board">
-          {entries.map((entry) => (
-            <li className="row" key={entry.repo}>
-              <span className="rank">{String(entry.rank).padStart(2, "0")}</span>
+      <div className="card__scroll">
+        {state !== "ready" ? (
+          <p className="card__empty">
+            {state === "loading" ? "正在读取榜单…" : "数据加载失败，请稍后重试。"}
+          </p>
+        ) : entries.length === 0 ? (
+          <p className="card__empty">本期这个榜单没有可展示的榜单条目。</p>
+        ) : (
+          <ol className="board">
+            {entries.map((entry) => (
+              <li className="row" key={entry.repo}>
+                <span className="rank">{String(entry.rank).padStart(2, "0")}</span>
 
-              <div className="body">
-                <a
-                  className="repo"
-                  href={entry.htmlUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {entry.repo}
-                </a>
-                <p className="desc">{entry.descEn ?? "暂无英文简介"}</p>
-                <div className="tags">
-                  {entry.language && <span className="tag language">{entry.language}</span>}
-                  {entry.tags.map((tag) => (
-                    <span className="tag" key={tag}>
-                      {tag}
-                    </span>
-                  ))}
+                <div className="row__body">
+                  <a
+                    className="repo"
+                    href={entry.htmlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {entry.repo}
+                  </a>
+                  <p className="desc">{entry.descEn ?? "暂无英文简介"}</p>
+                  <div className="tags">
+                    {entry.language && <span className="tag language">{entry.language}</span>}
+                    {entry.tags.map((tag) => (
+                      <span className="tag" key={tag}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="metrics">
+                    <span title="stars">★ {formatMetric(entry.stars)}</span>
+                    <span title="forks">⑂ {formatMetric(entry.forks)}</span>
+                    {entry.gained !== null && (
+                      <span className="gain" title="gained">
+                        ↑ {formatMetric(entry.gained)}
+                      </span>
+                    )}
+                    {entry.featured !== null && (
+                      <span className="featured" title="featured">
+                        ✦ {formatMetric(entry.featured)}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-
-              <div className="metrics">
-                <span title="stars">★ {formatMetric(entry.stars)}</span>
-                <span title="forks">⑂ {formatMetric(entry.forks)}</span>
-                {entry.gained !== null && (
-                  <span className="gain" title="gained">
-                    ↑ {formatMetric(entry.gained)}
-                  </span>
-                )}
-                {entry.featured !== null && (
-                  <span className="featured" title="featured">
-                    ✦ {formatMetric(entry.featured)}
-                  </span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </section>
   );
 }
@@ -96,41 +109,54 @@ export function App() {
     return () => controller.abort();
   }, []);
 
+  const labels = data?.labels ?? BOARD_LABELS;
+  const accents = data?.accents ?? BOARD_ACCENTS;
   const total = data
     ? BOARD_ORDER.reduce((sum, slug) => sum + data.boards[slug].length, 0)
     : 0;
 
   return (
-    <main className="page">
-      <header className="header">
-        <div>
-          <p className="eyebrow">TrendShift · 中文看板</p>
-          <h1>今日榜单</h1>
+    <main className="app">
+      <header className="topbar">
+        <div className="topbar__brand">
+          <span className="topbar__name">TrendShift</span>
+          <span className="topbar__sub">中文看板</span>
         </div>
-        <p className="edition">{data?.date ? `${data.date} UTC` : "等待首个期次"}</p>
+        <div className="topbar__slots">
+          <div className="topbar__slot">
+            <span className="topbar__label">期次</span>
+            <span className="topbar__value">
+              {data?.date ? `${data.date} UTC` : "等待首个期次"}
+            </span>
+          </div>
+          <div className="topbar__slot">
+            <span className="topbar__label">数据状态</span>
+            <span className="topbar__value topbar__value--pending">待接入</span>
+          </div>
+        </div>
       </header>
 
-      {state === "loading" && <p className="notice">正在读取榜单…</p>}
-
+      {state === "loading" && <p className="wall__notice">正在读取榜单…</p>}
       {state === "error" && (
-        <p className="notice error">数据加载失败，请稍后重试。</p>
+        <p className="wall__notice wall__notice--error">数据加载失败，请稍后重试。</p>
       )}
-
       {state === "ready" && total === 0 && (
-        <section className="empty">
-          <h2>还没有期次数据</h2>
-          <p>部署完成后，由运维手动触发一次采集，六个榜单的榜单条目就会出现在这里。</p>
-        </section>
+        <p className="wall__notice">
+          还没有期次数据，部署完成后由运维手动触发一次采集。
+        </p>
       )}
 
-      {state === "ready" && data && total > 0 &&
-        BOARD_ORDER.map((slug) => (
-          <BoardSection
+      <div className="wall">
+        {BOARD_ORDER.map((slug) => (
+          <BoardCard
             key={slug}
-            label={data.labels[slug]}
-            entries={data.boards[slug]}
+            label={labels[slug]}
+            accent={accents[slug]}
+            entries={data?.boards[slug] ?? []}
+            state={state}
           />
         ))}
+      </div>
     </main>
   );
 }

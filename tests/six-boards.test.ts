@@ -178,4 +178,18 @@ describe("六榜全量采集", () => {
     expect((await refresh()).status).toBe(200);
     expect((await readBoards("2026-10-30")).boards.weekly).toEqual([]);
   });
+
+  it("六个榜单各有固定配色，且不随期次变化", async () => {
+    const emptyEdition = await SELF.fetch(`${BASE}/api/boards?date=2020-01-01`);
+    expect(emptyEdition.status).toBe(200);
+    const empty = (await emptyEdition.json()) as BoardsResponse;
+
+    expect(Object.keys(empty.accents)).toEqual(EXPECTED_ORDER);
+    expect(new Set(Object.values(empty.accents)).size).toBe(EXPECTED_ORDER.length);
+
+    const laterEdition = await SELF.fetch(`${BASE}/api/boards?date=2026-11-05`);
+    expect(laterEdition.status).toBe(200);
+    const later = (await laterEdition.json()) as BoardsResponse;
+    expect(later.accents).toEqual(empty.accents);
+  });
 });

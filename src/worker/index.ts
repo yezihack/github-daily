@@ -7,6 +7,7 @@ import {
   listEditionDates,
   readBoards,
 } from "./boards";
+import { generateInterpretations } from "./interpretation";
 
 const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -32,6 +33,21 @@ async function refresh(request: Request, env: Cloudflare.Env): Promise<Response>
   return json({ date: result.date, count: result.count, warnings: result.warnings });
 }
 
+async function interpret(request: Request, env: Cloudflare.Env): Promise<Response> {
+  if (!env.ADMIN_TOKEN) {
+    return json({ error: "ADMIN_TOKEN_NOT_CONFIGURED" }, 503);
+  }
+  if (request.headers.get("Authorization") !== `Bearer ${env.ADMIN_TOKEN}`) {
+    return json({ error: "UNAUTHORIZED" }, 401);
+  }
+  if (!env.AI_API_KEY) {
+    return json({ error: "AI_NOT_CONFIGURED" }, 503);
+  }
+
+  const result = await generateInterpretations(env);
+  return json(result);
+}
+
 async function boards(url: URL, env: Cloudflare.Env): Promise<Response> {
   const requested = url.searchParams.get("date");
   if (requested !== null && !DATE_PARAM.test(requested)) {
@@ -54,6 +70,9 @@ export default {
 
     if (url.pathname === "/api/admin/refresh" && request.method === "POST") {
       return refresh(request, env);
+    }
+    if (url.pathname === "/api/admin/interpret" && request.method === "POST") {
+      return interpret(request, env);
     }
     if (url.pathname === "/api/boards" && request.method === "GET") {
       return boards(url, env);

@@ -1,6 +1,11 @@
 import { useEffect, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent } from "react";
 import { BOARD_ACCENTS, BOARD_LABELS, BOARD_ORDER } from "../shared/boards";
-import { EMPTY_DESCRIPTION, formatMetric, formatRank } from "../shared/format";
+import {
+  EMPTY_DESCRIPTION,
+  formatMetric,
+  formatRank,
+  interpretationStatusHint,
+} from "../shared/format";
 import type { BoardEntryResponse, BoardsResponse } from "../shared/types";
 import { DetailDrawer } from "./Drawer";
 
@@ -59,8 +64,17 @@ function BoardCard({
                 <span className="rank">{formatRank(entry.rank)}</span>
 
                 <div className="row__body">
-                  <span className="repo">{entry.repo}</span>
-                  <p className="desc">{entry.descEn ?? EMPTY_DESCRIPTION}</p>
+                  <span className="repo">
+                    {entry.repo}
+                    {entry.interpretation.status !== "done" && (
+                      <span className="badge">{interpretationStatusHint(entry.interpretation.status)}</span>
+                    )}
+                  </span>
+                  {entry.interpretation.status === "done" && entry.interpretation.summary ? (
+                    <p className="summary">{entry.interpretation.summary}</p>
+                  ) : (
+                    <p className="desc">{entry.descEn ?? EMPTY_DESCRIPTION}</p>
+                  )}
                   <div className="tags">
                     {entry.language && <span className="tag language">{entry.language}</span>}
                     {entry.tags.map((tag) => (

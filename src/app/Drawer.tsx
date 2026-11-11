@@ -1,5 +1,10 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { EMPTY_DESCRIPTION, formatMetric, formatRank } from "../shared/format";
+import {
+  EMPTY_DESCRIPTION,
+  formatMetric,
+  formatRank,
+  interpretationStatusHint,
+} from "../shared/format";
 import type { BoardEntryResponse } from "../shared/types";
 
 function Metric({ label, children }: { label: string; children: ReactNode }) {
@@ -131,8 +136,34 @@ export function DetailDrawer({
           </section>
 
           <section className="drawer__section">
-            <h3 className="drawer__label">中文解读</h3>
-            <p className="drawer__pending">待生成</p>
+            <h3 className="drawer__label">
+              AI 解读
+              <span className="drawer__ai-note">由 AI 生成，仅供参考</span>
+            </h3>
+            {entry.interpretation.status === "done" ? (
+              <div className="drawer__interpretation">
+                <div className="drawer__seg">
+                  <span className="drawer__seg-label">简介</span>
+                  <p className="drawer__seg-text">{entry.interpretation.summary}</p>
+                </div>
+                <div className="drawer__seg">
+                  <span className="drawer__seg-label">解决问题</span>
+                  <p className="drawer__seg-text">{entry.interpretation.solves}</p>
+                </div>
+                <div className="drawer__seg">
+                  <span className="drawer__seg-label">适用人群</span>
+                  <p className="drawer__seg-text">{entry.interpretation.audience}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="drawer__pending">
+                {entry.interpretation.status === "none"
+                  ? "待生成"
+                  : `${interpretationStatusHint(entry.interpretation.status)}${
+                      entry.interpretation.status === "failed" ? "，稍后重试。" : "…"
+                    }`}
+              </p>
+            )}
           </section>
         </div>
       </aside>

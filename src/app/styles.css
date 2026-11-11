@@ -219,6 +219,27 @@ body {
   text-decoration: underline;
 }
 
+.badge {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  vertical-align: middle;
+}
+
+.summary {
+  margin: 4px 0 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .desc {
   margin: 4px 0 8px;
   color: var(--soft);
@@ -462,6 +483,43 @@ body {
   border-radius: 8px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.drawer__ai-note {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: none;
+}
+
+.drawer__interpretation {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.drawer__seg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.drawer__seg-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.drawer__seg-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 720px) {

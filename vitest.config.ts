@@ -11,6 +11,9 @@ export default defineConfig(async () => {
         miniflare: {
           bindings: {
             ADMIN_TOKEN: "test-admin-token",
+            AI_BASE_URL: "https://ai.example.com/v1",
+            AI_API_KEY: "test-ai-key",
+            AI_MODEL: "test-model",
             TEST_MIGRATIONS: migrations,
           },
         },

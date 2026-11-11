@@ -1,5 +1,10 @@
 import { BOARDS, BOARD_ORDER, type BoardMeta, type BoardSlug } from "../shared/boards";
-import type { BoardEntryResponse, BoardsBySlug } from "../shared/types";
+import type {
+  BoardEntryResponse,
+  BoardsBySlug,
+  Interpretation,
+  InterpretationStatus,
+} from "../shared/types";
 import { decodeRscChunks, extractArray } from "./rsc";
 
 const VALID_REPO_ID = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -43,6 +48,13 @@ function optionalHomepage(value: unknown): string | null {
     return null;
   }
 }
+
+const NO_INTERPRETATION: Interpretation = {
+  summary: null,
+  solves: null,
+  audience: null,
+  status: "none",
+};
 
 function tagNames(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -92,6 +104,7 @@ function normalizeGrowthRows(rows: unknown[], label: string): NormalizedBoard {
       htmlUrl: `https://github.com/${repoId}`,
       homepage: optionalHomepage(item.repository_homepage),
       descEn: optionalText(item.repository_description),
+      interpretation: NO_INTERPRETATION,
       stars: finiteNumber(item.repository_stars),
       forks: finiteNumber(item.repository_forks),
       gained: finiteNumber(item.repository_stars_gained),
@@ -120,6 +133,7 @@ function normalizeTrendingRows(rows: unknown[], label: string): NormalizedBoard 
       htmlUrl: `https://github.com/${repoId}`,
       homepage: optionalHomepage(item.homepage),
       descEn: optionalText(item.description),
+      interpretation: NO_INTERPRETATION,
       stars: finiteNumber(item.watchers),
       forks: finiteNumber(item.forks),
       gained: null,
@@ -150,6 +164,7 @@ function normalizeMentionRows(rows: unknown[], label: string): NormalizedBoard {
       htmlUrl: `https://github.com/${repoId}`,
       homepage: optionalHomepage(item.repository_homepage),
       descEn: optionalText(item.repository_description),
+      interpretation: NO_INTERPRETATION,
       stars: finiteNumber(item.repository_stars) ?? finiteNumber(item.stars),
       forks: finiteNumber(item.repository_forks) ?? finiteNumber(item.forks),
       gained: null,
@@ -305,6 +320,10 @@ interface BoardRow {
   html_url: string;
   homepage: string | null;
   description_en: string | null;
+  interp_summary: string | null;
+  interp_solves: string | null;
+  interp_audience: string | null;
+  interp_status: string | null;
   stars: number | null;
   forks: number | null;
   gained: number | null;
@@ -318,9 +337,12 @@ export async function readBoards(db: D1Database, date: string): Promise<BoardsBy
   const result = await db
     .prepare(
       `SELECT e.board, e.rank, e.repo_id, r.html_url, r.homepage, r.description_en,
+              i.summary AS interp_summary, i.solves AS interp_solves,
+              i.audience AS interp_audience, i.status AS interp_status,
               e.stars, e.forks, e.gained, e.featured, e.language, e.tags
        FROM board_entries e
        JOIN repositories r ON r.id = e.repo_id
+       LEFT JOIN interpretations i ON i.repo_id = e.repo_id
        WHERE e.date = ?
        ORDER BY e.board, e.rank`,
     )
@@ -330,12 +352,19 @@ export async function readBoards(db: D1Database, date: string): Promise<BoardsBy
   for (const row of result.results) {
     const bucket = boards[row.board as BoardSlug];
     if (!bucket) continue;
+    const status = row.interp_status as InterpretationStatus | null;
     bucket.push({
       rank: row.rank,
       repo: row.repo_id,
       htmlUrl: row.html_url,
       homepage: row.homepage,
       descEn: row.description_en,
+      interpretation: {
+        summary: row.interp_summary,
+        solves: row.interp_solves,
+        audience: row.interp_audience,
+        status: status ?? "none",
+      },
       stars: row.stars,
       forks: row.forks,
       gained: row.gained,

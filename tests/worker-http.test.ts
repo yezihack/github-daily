@@ -34,6 +34,7 @@ describe("日榜端到端", () => {
       htmlUrl: "https://github.com/owner0/repo0",
       homepage: null,
       descEn: "English description for repo 0.",
+      interpretation: { summary: null, solves: null, audience: null, status: "none" },
       stars: 1000,
       forks: 10,
       gained: 100,

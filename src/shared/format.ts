@@ -1,4 +1,4 @@
-import type { InterpretationStatus } from "./types";
+import type { InterpretationStatus, DataFreshness } from "./types";
 
 export const EMPTY_DESCRIPTION = "暂无英文简介";
 
@@ -11,8 +11,16 @@ export function formatRank(rank: number): string {
 }
 
 export function interpretationStatusHint(status: InterpretationStatus): string {
-  if (status === "failed") return "AI 解读生成失败";
-  if (status === "pending") return "AI 解读生成中";
-  if (status === "none") return "AI 解读待生成";
+  if (status === "failed") return "解读暂缺";
+  if (status === "pending") return "解读生成中";
+  if (status === "none") return "";
   return "";
 }
+
+export function dataFreshnessHint(freshness: DataFreshness, date: string | null): string {
+  if (freshness === "latest") return "";
+  if (freshness === "historic") return "历史期次";
+  if (freshness === "fallback" && date) return `数据更新于 ${date} UTC`;
+  return "";
+}
+

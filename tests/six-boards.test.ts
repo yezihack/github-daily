@@ -1,7 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { BoardSlug } from "../src/shared/boards";
 import type { BoardsResponse } from "../src/shared/types";
 import { boardPages } from "./fixtures/boards-rsc";
@@ -46,6 +46,15 @@ async function readBoards(date: string): Promise<BoardsResponse> {
 }
 
 describe("六榜全量采集", () => {
+  beforeEach(async () => {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM interpretations"),
+      env.DB.prepare("DELETE FROM board_entries"),
+      env.DB.prepare("DELETE FROM editions"),
+      env.DB.prepare("DELETE FROM repositories"),
+    ]);
+  });
+
   it("一次采集返回六个榜单各 25 条，中文名称与顺序固定", async () => {
     servePages(boardPages({ date: "2026-11-05" }));
 
@@ -169,14 +178,14 @@ describe("六榜全量采集", () => {
     }
   });
 
-  it("同日重复采集时，缺失的榜会覆盖掉当期旧条目", async () => {
+  it("同日重复采集时，缺失的榜沿用上一期次条目而非清空", async () => {
     servePages(boardPages({ date: "2026-10-30" }));
     expect((await refresh()).status).toBe(200);
     expect((await readBoards("2026-10-30")).boards.weekly).toHaveLength(25);
 
     servePages(boardPages({ date: "2026-10-30", overrides: { weekly: null } }));
     expect((await refresh()).status).toBe(200);
-    expect((await readBoards("2026-10-30")).boards.weekly).toEqual([]);
+    expect((await readBoards("2026-10-30")).boards.weekly).toHaveLength(25);
   });
 
   it("六个榜单各有固定配色，且不随期次变化", async () => {

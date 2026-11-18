@@ -1,6 +1,7 @@
 import type { BoardSlug } from "./boards";
 
 export type InterpretationStatus = "none" | "pending" | "done" | "failed";
+export type DataFreshness = "latest" | "historic" | "fallback";
 
 export interface Interpretation {
   summary: string | null;
@@ -32,4 +33,7 @@ export interface BoardsResponse {
   labels: Record<BoardSlug, string>;
   accents: Record<BoardSlug, string>;
   boards: BoardsBySlug;
+  data_freshness: DataFreshness;
+  fallback_date?: string; // When data_freshness is "fallback", this shows the date data came from
+  pending_interpretations: number;
 }

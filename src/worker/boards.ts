@@ -15,6 +15,7 @@ export interface IngestResult {
   date: string | null;
   count: number;
   warnings: string[];
+  fallbacks?: Record<string, { board: string; date: string }>;
 }
 
 interface FetchedBoard {
@@ -251,24 +252,100 @@ export async function ingestBoards(db: D1Database): Promise<IngestResult> {
   );
 
   const withRows = fetched.filter((board) => board.rows && board.rows.length > 0);
+  const missingBoards = fetched.filter((board) => !board.rows || board.rows.length === 0);
   const missingWarnings = (): string[] =>
-    fetched
-      .filter((board) => !board.rows || board.rows.length === 0)
-      .map(
-        (board) =>
-          `[${board.meta.label}] 首包 HTML 中没有可解析的 ${board.meta.rscKey} 载荷`,
-      );
+    missingBoards.map(
+      (board) =>
+        `[${board.meta.label}] 首包 HTML 中没有可解析的 ${board.meta.rscKey} 载荷`,
+    );
 
   if (withRows.length === 0) {
-    return { date: null, count: 0, warnings: missingWarnings() };
+    // Even if all boards are missing, we should handle fallbacks
+    const now = new Date().toISOString();
+    const warnings: string[] = missingWarnings();
+    let count = 0;
+    const fallbacks: Record<string, { board: string; date: string }> = {};
+    let date: string | null = null;
+    let hasAnyFallback = false;
+
+    // Process fallbacks for all missing boards
+    for (const board of missingBoards) {
+      const prevDate = await db
+        .prepare(
+          `SELECT date FROM editions WHERE board = ? ORDER BY date DESC LIMIT 1`,
+        )
+        .bind(board.meta.slug)
+        .first<{ date: string }>();
+
+      if (prevDate) {
+        hasAnyFallback = true;
+        // Use today's date for the fallback data
+        if (!date) {
+          date = new Date().toISOString().slice(0, 10);
+        }
+
+        const prevEntries = await db
+          .prepare(
+            `SELECT e.* FROM board_entries e
+             WHERE e.board = ? AND e.date = ?
+             ORDER BY e.rank LIMIT 25`,
+          )
+          .bind(board.meta.slug, prevDate.date)
+          .all<BoardRow>();
+
+        const statements = [
+          db
+            .prepare("DELETE FROM board_entries WHERE board = ? AND date = ?")
+            .bind(board.meta.slug, date),
+          editionUpsert(db, board.meta.slug, date, now),
+        ];
+
+        for (const entry of prevEntries.results) {
+          statements.push(
+            db
+              .prepare(
+                `INSERT INTO board_entries
+                   (board, date, repo_id, rank, stars, forks, gained, featured, language, tags)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .bind(
+                entry.board,
+                date,
+                entry.repo_id,
+                entry.rank,
+                entry.stars,
+                entry.forks,
+                entry.gained,
+                entry.featured,
+                entry.language,
+                entry.tags,
+              ),
+          );
+        }
+
+        await db.batch(statements);
+        count += prevEntries.results.length;
+        fallbacks[board.meta.slug] = {
+          board: board.meta.label,
+          date: prevDate.date,
+        };
+        warnings.push(`[${board.meta.label}] 沿用 ${prevDate.date} 的数据（${prevEntries.results.length} 条）`);
+      }
+    }
+
+    for (const warning of warnings) console.warn(warning);
+    // Return error if no fallbacks were found (all boards missing AND no previous data)
+    return { date: hasAnyFallback ? date : null, count, warnings, fallbacks };
   }
 
   const date = editionDate(withRows);
   const now = new Date().toISOString();
   const warnings: string[] = missingWarnings();
   let count = 0;
+  const fallbacks: Record<string, { board: string; date: string }> = {};
 
-  for (const board of fetched) {
+  // Process boards with data
+  for (const board of withRows) {
     const normalized = normalizeBoard(board);
     warnings.push(...normalized.warnings);
     count += normalized.entries.length;
@@ -286,8 +363,71 @@ export async function ingestBoards(db: D1Database): Promise<IngestResult> {
     await db.batch(statements);
   }
 
+  // Handle fallbacks for missing boards
+  for (const board of missingBoards) {
+    // Find the latest date for this board
+    const prevDate = await db
+      .prepare(
+        `SELECT date FROM editions WHERE board = ? ORDER BY date DESC LIMIT 1`,
+      )
+      .bind(board.meta.slug)
+      .first<{ date: string }>();
+
+    if (prevDate) {
+      // Get previous data and insert as fallback
+      const prevEntries = await db
+        .prepare(
+          `SELECT e.* FROM board_entries e
+           WHERE e.board = ? AND e.date = ?
+           ORDER BY e.rank LIMIT 25`,
+        )
+        .bind(board.meta.slug, prevDate.date)
+        .all<BoardRow>();
+
+      // Insert fallback data with today's date
+      const statements = [
+        db
+          .prepare("DELETE FROM board_entries WHERE board = ? AND date = ?")
+          .bind(board.meta.slug, date),
+        editionUpsert(db, board.meta.slug, date, now),
+      ];
+
+      for (const entry of prevEntries.results) {
+        // Reconstruct the entry without touching the repository table
+        statements.push(
+          db
+            .prepare(
+              `INSERT INTO board_entries
+                 (board, date, repo_id, rank, stars, forks, gained, featured, language, tags)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .bind(
+              entry.board,
+              date,
+              entry.repo_id,
+              entry.rank,
+              entry.stars,
+              entry.forks,
+              entry.gained,
+              entry.featured,
+              entry.language,
+              entry.tags,
+            ),
+        );
+      }
+
+      await db.batch(statements);
+      count += prevEntries.results.length;
+      fallbacks[board.meta.slug] = {
+        board: board.meta.label,
+        date: prevDate.date,
+      };
+      warnings.push(`[${board.meta.label}] 沿用 ${prevDate.date} 的数据（${prevEntries.results.length} 条）`);
+    }
+  }
+
   for (const warning of warnings) console.warn(warning);
-  return { date, count, warnings };
+  return { date, count, warnings, fallbacks };
 }
 
 export async function listEditionDates(db: D1Database): Promise<string[]> {
@@ -334,44 +474,49 @@ interface BoardRow {
 
 export async function readBoards(db: D1Database, date: string): Promise<BoardsBySlug> {
   const boards = emptyBoards();
-  const result = await db
-    .prepare(
-      `SELECT e.board, e.rank, e.repo_id, r.html_url, r.homepage, r.description_en,
-              i.summary AS interp_summary, i.solves AS interp_solves,
-              i.audience AS interp_audience, i.status AS interp_status,
-              e.stars, e.forks, e.gained, e.featured, e.language, e.tags
-       FROM board_entries e
-       JOIN repositories r ON r.id = e.repo_id
-       LEFT JOIN interpretations i ON i.repo_id = e.repo_id
-       WHERE e.date = ?
-       ORDER BY e.board, e.rank`,
-    )
-    .bind(date)
-    .all<BoardRow>();
+  
+  // Query each board separately to get up to 25 entries per board
+  for (const boardSlug of BOARD_ORDER) {
+    const result = await db
+      .prepare(
+        `SELECT e.board, e.rank, e.repo_id, r.html_url, r.homepage, r.description_en,
+                i.summary AS interp_summary, i.solves AS interp_solves,
+                i.audience AS interp_audience, i.status AS interp_status,
+                e.stars, e.forks, e.gained, e.featured, e.language, e.tags
+         FROM board_entries e
+         JOIN repositories r ON r.id = e.repo_id
+         LEFT JOIN interpretations i ON i.repo_id = e.repo_id
+         WHERE e.date = ? AND e.board = ?
+         ORDER BY e.rank
+         LIMIT 25`,
+      )
+      .bind(date, boardSlug)
+      .all<BoardRow>();
 
-  for (const row of result.results) {
-    const bucket = boards[row.board as BoardSlug];
-    if (!bucket) continue;
-    const status = row.interp_status as InterpretationStatus | null;
-    bucket.push({
-      rank: row.rank,
-      repo: row.repo_id,
-      htmlUrl: row.html_url,
-      homepage: row.homepage,
-      descEn: row.description_en,
-      interpretation: {
-        summary: row.interp_summary,
-        solves: row.interp_solves,
-        audience: row.interp_audience,
-        status: status ?? "none",
-      },
-      stars: row.stars,
-      forks: row.forks,
-      gained: row.gained,
-      featured: row.featured,
-      language: row.language,
-      tags: JSON.parse(row.tags) as string[],
-    });
+    for (const row of result.results) {
+      const bucket = boards[row.board as BoardSlug];
+      if (!bucket) continue;
+      const status = row.interp_status as InterpretationStatus | null;
+      bucket.push({
+        rank: row.rank,
+        repo: row.repo_id,
+        htmlUrl: row.html_url,
+        homepage: row.homepage,
+        descEn: row.description_en,
+        interpretation: {
+          summary: row.interp_summary,
+          solves: row.interp_solves,
+          audience: row.interp_audience,
+          status: status ?? "none",
+        },
+        stars: row.stars,
+        forks: row.forks,
+        gained: row.gained,
+        featured: row.featured,
+        language: row.language,
+        tags: JSON.parse(row.tags) as string[],
+      });
+    }
   }
 
   return boards;

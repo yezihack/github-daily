@@ -84,7 +84,7 @@ async function seedRepo(id: string, board: string, rank = 1): Promise<void> {
 }
 
 async function interpret(): Promise<Response> {
-  return SELF.fetch(`${BASE}/api/admin/interpret`, { method: "POST", headers: AUTH });
+  return SELF.fetch(`${BASE}/api/admin/interpretations/process`, { method: "POST", headers: AUTH });
 }
 
 async function read(): Promise<BoardsResponse> {
@@ -108,7 +108,8 @@ describe("AI 三段解读", () => {
 
     const response = await interpret();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ done: 1, failed: 1 });
+    // 坏 JSON 先记为 pending（重试 1/3），累计 3 次才转 failed
+    expect(await response.json()).toEqual({ done: 1, failed: 0, pending: 1 });
 
     const rows = await interpRows();
     expect(rows).toHaveLength(2);
@@ -116,8 +117,13 @@ describe("AI 三段解读", () => {
     expect(good.status).toBe("done");
     expect(good.summary).toBe(GOOD.summary);
     const bad = rows.find((r) => r.repo_id === "badjson/repo")!;
-    expect(bad.status).toBe("failed");
+    expect(bad.status).toBe("pending");
     expect(bad.summary).toBeNull();
+
+    await interpret();
+    expect(await (await interpret()).json()).toEqual({ done: 0, failed: 1, pending: 0 });
+    const failedRows = await interpRows();
+    expect(failedRows.find((r) => r.repo_id === "badjson/repo")!.status).toBe("failed");
 
     const body = await read();
     const entry = body.boards.daily[0];
@@ -132,8 +138,10 @@ describe("AI 三段解读", () => {
 
     const response = await interpret();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ done: 0, failed: 2 });
+    expect(await response.json()).toEqual({ done: 0, failed: 0, pending: 2 });
 
+    await interpret();
+    expect(await (await interpret()).json()).toEqual({ done: 0, failed: 2, pending: 0 });
     const rows = await interpRows();
     expect(rows.every((r) => r.status === "failed" && r.summary === null)).toBe(true);
   });
@@ -145,7 +153,7 @@ describe("AI 三段解读", () => {
 
     const response = await interpret();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ done: 1, failed: 0 });
+    expect(await response.json()).toEqual({ done: 1, failed: 0, pending: 0 });
 
     const rows = await interpRows();
     expect(rows).toHaveLength(1);

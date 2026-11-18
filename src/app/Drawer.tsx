@@ -21,11 +21,15 @@ export function DetailDrawer({
   editionDate,
   accent,
   onClose,
+  isBookmarked,
+  onToggleBookmark,
 }: {
   entry: BoardEntryResponse;
   editionDate: string;
   accent: string;
   onClose: () => void;
+  isBookmarked?: boolean;
+  onToggleBookmark?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -133,6 +137,16 @@ export function DetailDrawer({
             >
               {copied ? "已复制地址" : "复制仓库地址"}
             </button>
+            {onToggleBookmark && (
+              <button
+                type="button"
+                className={`drawer__bookmark ${isBookmarked ? "drawer__bookmark--active" : ""}`}
+                onClick={onToggleBookmark}
+                aria-label={isBookmarked ? "取消收藏" : "收藏仓库"}
+              >
+                {isBookmarked ? "♥ 已收藏" : "♡ 收藏"}
+              </button>
+            )}
           </section>
 
           <section className="drawer__section">

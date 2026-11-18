@@ -1,6 +1,7 @@
 import { SELF } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { BoardsResponse } from "../src/shared/types";
 import { boardPages } from "./fixtures/boards-rsc";
 import { makeDailyRow } from "./fixtures/daily-rsc";
@@ -30,6 +31,15 @@ async function readBoard(date: string): Promise<BoardsResponse> {
 }
 
 describe("采集边界", () => {
+  beforeEach(async () => {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM interpretations"),
+      env.DB.prepare("DELETE FROM board_entries"),
+      env.DB.prepare("DELETE FROM editions"),
+      env.DB.prepare("DELETE FROM repositories"),
+    ]);
+  });
+
   it("非法仓库标识被丢弃并留下警告，不产生无效链接", async () => {
     serveRsc([
       makeDailyRow(0, { date: "2026-11-07T00:00:00Z", full_name: "NoSlash" }),

@@ -6,7 +6,9 @@ compatibility_date = "2026-11-09"
 directory = "./dist"
 binding = "ASSETS"
 
-# ADMIN_TOKEN 通过 `wrangler secret put ADMIN_TOKEN` 注入；本地开发写入 .dev.vars
+# 敏感信息不要写进本文件：
+#   生产用 `wrangler secret put ADMIN_TOKEN` 等命令注入
+#   本地开发写 .dev.vars（已在 .gitignore 中）
 
 [[d1_databases]]
 binding = "DB"
@@ -14,3 +16,8 @@ database_name = "trendshift-daily-wall"
 # 部署前用 `wrangler d1 create trendshift-daily-wall` 得到的真实 ID 替换
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+# 定时任务放在顶层，确保默认环境（npm run deploy）也生效。
+# D1 绑定不会被子环境继承，因此不单独维护 env.production。
+[triggers]
+crons = ["10 0 * * *", "*/1 * * * *"]

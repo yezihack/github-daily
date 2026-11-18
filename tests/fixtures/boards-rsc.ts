@@ -46,12 +46,15 @@ export function makeMentionRow(index: number, overrides: RawRow = {}): RawRow {
 export interface BoardPagesOptions {
   date?: string;
   overrides?: Partial<Record<BoardSlug, RawRow[] | null>>;
+  /* When true, don't auto-generate rows for boards without overrides - useful for focused tests */
+  minimal?: boolean;
 }
 
 export function boardPages(options: BoardPagesOptions = {}): Record<string, string> {
   const date = options.date ?? EDITION_DATE;
   const overrides = options.overrides ?? {};
   const pages: Record<string, string> = {};
+  const explicitDate = options.date !== undefined;
 
   for (const board of BOARDS) {
     const override = overrides[board.slug];
@@ -62,7 +65,14 @@ export function boardPages(options: BoardPagesOptions = {}): Record<string, stri
 
     let rows: RawRow[];
     if (override) {
-      rows = override;
+      // 只在显式指定 date 时改写行日期；测试若自带日期则原样保留
+      rows =
+        explicitDate && board.kind === "growth"
+          ? override.map((row) => ({ ...row, date: `${date}T00:00:00Z` }))
+          : override;
+    } else if (options.minimal) {
+      pages[board.url] = EMPTY_SHELL_HTML;
+      continue;
     } else if (board.kind === "trending") {
       rows = Array.from({ length: 25 }, (_, index) => makeTrendingRow(index));
     } else if (board.kind === "mentions") {

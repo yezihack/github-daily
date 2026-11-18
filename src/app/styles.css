@@ -1,3 +1,15 @@
+/* 工单 03：全屏六榜卡片墙
+ * - 1920×1080 下六卡 3x2 网格铺满视口，整页无滚动条
+ * - 每卡内部独立滚动，可到达该榜第 25 条
+ * - 六个榜单各有固定配色（通过 --accent 变量）
+ * - 荧光绿 (--signal) 仅用于增长数与收藏态
+ * - 数字使用等宽字体 (--mono) 与 tabular-nums
+ * - 中文字体系统回退：Microsoft YaHei, Noto Sans CJK SC 等
+ * - 移动端回退为单列纵向滚动
+ * - 顶栏骨架含站名、日期位与数据状态位
+ * - 全屏是 CSS 布局 (100vh flex)，不调用 Fullscreen API
+ */
+
 :root {
   color-scheme: dark;
   --bg: #0d1117;
@@ -6,9 +18,9 @@
   --text: #e6edf3;
   --soft: #a9b4c2;
   --muted: #8b949e;
-  --signal: #c8f751;
-  --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --signal: #c8f751;  /* 荧光绿，仅用于增长数与收藏态 */
+  --mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
   background: var(--bg);
   color: var(--text);
 }
@@ -21,20 +33,22 @@ html,
 body,
 #root {
   height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
   margin: 0;
-  overflow: hidden;
+  padding: 0;
+  overflow: hidden;  /* 整页无滚动条 */
   background: var(--bg);
 }
 
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
+  height: 100vh;  /* 铺满视口 */
+  overflow: hidden;  /* 整页无滚动条 */
 }
 
 .topbar {
@@ -119,12 +133,13 @@ body {
 
 .wall {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 0;  /* 关键：允许 flex 子元素缩小 */
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));  /* 3 列 */
+  grid-template-rows: repeat(2, minmax(0, 1fr));  /* 2 行，六卡铺满 */
   gap: 12px;
   padding: 12px 20px 20px;
+  overflow: hidden;  /* 墙本身不滚动 */
 }
 
 .card {
@@ -165,9 +180,28 @@ body {
 
 .card__scroll {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  min-height: 0;  /* 关键：允许滚动容器缩小 */
+  overflow-y: auto;  /* 卡片内部独立滚动 */
+  overflow-x: hidden;
+  overscroll-behavior: contain;  /* 防止滚动穿透 */
+}
+
+/* 优化滚动条样式（可选） */
+.card__scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.card__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.card__scroll::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+
+.card__scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
 .card__empty {
@@ -189,15 +223,23 @@ body {
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
+  cursor: pointer;  /* 可点击指示 */
+  transition: background 0.15s ease;  /* 平滑悬停效果 */
 }
 
 .row:hover {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.row:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .rank {
-  font-family: var(--mono);
+  font-family: var(--mono);  /* 等宽字体用于数字 */
   font-size: 15px;
+  font-variant-numeric: tabular-nums;  /* 数字等宽对齐 */
   color: var(--muted);
   line-height: 1.4;
 }
@@ -271,13 +313,15 @@ body {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 8px;
-  font-family: var(--mono);
+  font-family: var(--mono);  /* 等宽字体用于数字 */
   font-size: 11px;
+  font-variant-numeric: tabular-nums;  /* 数字等宽对齐 */
   color: var(--muted);
 }
 
 .metrics .gain {
-  color: var(--signal);
+  color: var(--signal);  /* 荧光绿用于增长数 */
+  font-weight: 600;
 }
 
 .metrics .featured {
@@ -522,6 +566,7 @@ body {
   word-break: break-word;
 }
 
+/* 移动端：单列纵向滚动 */
 @media (max-width: 720px) {
   html,
   body,
@@ -530,7 +575,7 @@ body {
   }
 
   body {
-    overflow: auto;
+    overflow: auto;  /* 移动端允许页面滚动 */
   }
 
   .app {
@@ -550,12 +595,16 @@ body {
 
   .wall {
     display: flex;
-    flex-direction: column;
+    flex-direction: column;  /* 单列布局 */
     padding: 12px;
   }
 
+  .card {
+    min-height: 400px;  /* 移动端每卡最小高度 */
+  }
+
   .card__scroll {
-    overflow: visible;
+    overflow: visible;  /* 移动端卡片内容不单独滚动 */
   }
 
   .drawer__panel {

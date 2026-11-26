@@ -14,7 +14,7 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "trendshift-daily-wall"
 # 部署前用 `wrangler d1 create trendshift-daily-wall` 得到的真实 ID 替换
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "5ef017f7-f4b0-4d1c-8996-f6319432fb15"
 migrations_dir = "migrations"
 
 # 定时任务放在顶层，确保默认环境（npm run deploy）也生效。

@@ -37,3 +37,24 @@ export interface BoardsResponse {
   fallback_date?: string; // When data_freshness is "fallback", this shows the date data came from
   pending_interpretations: number;
 }
+
+export interface InterpretationRun {
+  id: number;
+  started_at: string;
+  finished_at: string;
+  trigger: string;
+  scanned: number;
+  done: number;
+  failed: number;
+  rate_limited: number;
+  duration_ms: number;
+  errors: string | null;
+}
+
+export interface InterpretationRunsResponse {
+  runs: InterpretationRun[];
+}
+
+export interface AdminStatusResponse {
+  pending: number;
+}

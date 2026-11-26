@@ -20,4 +20,4 @@ migrations_dir = "migrations"
 # 定时任务放在顶层，确保默认环境（npm run deploy）也生效。
 # D1 绑定不会被子环境继承，因此不单独维护 env.production。
 [triggers]
-crons = ["10 0 * * *", "*/1 * * * *"]
+crons = ["10 0 * * *", "*/10 * * * *"]

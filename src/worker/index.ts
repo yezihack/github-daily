@@ -7,7 +7,13 @@ import {
   listEditionDates,
   readBoards,
 } from "./boards";
-import { processInterpretationQueue, retryFailedInterpretations, countPendingInterpretations } from "./interpretation";
+import {
+  processInterpretationQueue,
+  retryFailedInterpretations,
+  countPendingInterpretations,
+  listInterpretationRuns,
+} from "./interpretation";
+import type { InterpretationRunsResponse } from "../shared/types";
 
 const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -89,8 +95,22 @@ async function handleProcessInterpretations(request: Request, env: Cloudflare.En
   }
 
   try {
-    const result = await processInterpretationQueue(env);
+    const result = await processInterpretationQueue(env, "manual");
     return json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "UNKNOWN";
+    return json({ error: message }, 500);
+  }
+}
+
+async function handleInterpretationRuns(request: Request, env: Cloudflare.Env): Promise<Response> {
+  if (!checkAuth(request, env)) {
+    return json({ error: "UNAUTHORIZED" }, 401);
+  }
+
+  try {
+    const body: InterpretationRunsResponse = { runs: await listInterpretationRuns(env.DB) };
+    return json(body);
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN";
     return json({ error: message }, 500);
@@ -310,7 +330,7 @@ async function handleScheduledIngest(env: Cloudflare.Env): Promise<Response> {
 
 async function handleScheduledInterpretation(env: Cloudflare.Env): Promise<Response> {
   try {
-    const result = await processInterpretationQueue(env);
+    const result = await processInterpretationQueue(env, "cron");
     return json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN";
@@ -334,6 +354,9 @@ export default {
     if (url.pathname === "/api/admin/status" && request.method === "GET") {
       return handleStatus(request, env);
     }
+    if (url.pathname === "/api/admin/interpretation-runs" && request.method === "GET") {
+      return handleInterpretationRuns(request, env);
+    }
     if (url.pathname === "/api/boards" && request.method === "GET") {
       return handleBoards(url, env);
     }
@@ -349,26 +372,18 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Cloudflare.Env): Promise<void> {
-    // Scheduled event handlers
-    // Different cron jobs can be differentiated by timing or via handler name
-    const now = new Date();
-    const minutes = now.getUTCMinutes();
-    const hours = now.getUTCHours();
-
-    // Daily ingest at 00:10 UTC
-    if (hours === 0 && minutes === 10) {
+    // 用 event.cron 区分触发器，避免 */10 在 00:10 也触发一次重复采集。
+    if (event.cron === "10 0 * * *") {
       try {
         await handleScheduledIngest(env);
-        console.log("[Scheduled] Daily ingest completed");
+        console.log("[Scheduled] Daily ingest completed", { cron: event.cron });
       } catch (error) {
         console.error("[Scheduled] Daily ingest failed:", error);
       }
     }
 
-    // Interpretation processing every minute
     try {
       await handleScheduledInterpretation(env);
-      console.log("[Scheduled] Interpretation queue processed");
     } catch (error) {
       console.error("[Scheduled] Interpretation processing failed:", error);
     }

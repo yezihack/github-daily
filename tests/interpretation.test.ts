@@ -166,4 +166,35 @@ describe("AI 三段解读", () => {
     expect(body.boards.daily[0].interpretation.status).toBe<InterpretationStatus>("none");
     expect(body.boards.daily[0].descEn).toBe("English description for pending/repo.");
   });
+
+  it("AI 返回 429 时进入退避，本轮不再重试，并记录运行日志", async () => {
+    await seedRepo("rate/limited", "daily");
+    network.use(http.post(AI_URL, () => new HttpResponse(null, { status: 429 })));
+
+    const first = await interpret();
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ done: 0, failed: 0, pending: 1 });
+
+    const row = await env.DB
+      .prepare("SELECT status, error, next_attempt_at FROM interpretations WHERE repo_id = ?")
+      .bind("rate/limited")
+      .first<{ status: string; error: string; next_attempt_at: string | null }>();
+    expect(row?.status).toBe("pending");
+    expect(row?.error).toBe("AI_HTTP_429");
+    expect(row?.next_attempt_at).not.toBeNull();
+
+    const second = await interpret();
+    expect(await second.json()).toEqual({ done: 0, failed: 0, pending: 1 });
+
+    const runsResponse = await SELF.fetch(`${BASE}/api/admin/interpretation-runs`, {
+      headers: AUTH,
+    });
+    expect(runsResponse.status).toBe(200);
+    const runsBody = (await runsResponse.json()) as {
+      runs: { trigger: string; rate_limited: number; scanned: number }[];
+    };
+    const rateLimitedRun = runsBody.runs.find((run) => run.rate_limited === 1);
+    expect(rateLimitedRun?.trigger).toBe("manual");
+    expect(rateLimitedRun?.scanned).toBe(1);
+  });
 });

@@ -566,6 +566,161 @@ body {
   word-break: break-word;
 }
 
+/* 运维面板：手动触发、状态与运行日志 */
+.topbar__admin {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--soft);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.topbar__admin:hover,
+.topbar__admin[aria-expanded="true"] {
+  border-color: var(--signal);
+  color: var(--text);
+}
+
+.admin-panel {
+  position: fixed;
+  top: 72px;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  width: 440px;
+  max-width: calc(100vw - 40px);
+  overflow: auto;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+  font-size: 13px;
+}
+
+.admin-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.admin-panel__head h2 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.admin-panel__close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.admin-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--soft);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.admin-panel__field input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.admin-panel__hint {
+  margin: 8px 0 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.admin-panel__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-panel__actions button {
+  padding: 9px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.admin-panel__actions button:hover:not(:disabled) {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.admin-panel__actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.admin-panel__schedule,
+.admin-panel__status,
+.admin-panel__message {
+  margin: 12px 0 0;
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-panel__message {
+  color: var(--signal);
+}
+
+.admin-panel__logs {
+  margin-top: 18px;
+}
+
+.admin-panel__logs h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--soft);
+}
+
+.admin-panel__logs table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.admin-panel__logs th,
+.admin-panel__logs td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-panel__logs th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 /* 移动端：单列纵向滚动 */
 @media (max-width: 720px) {
   html,

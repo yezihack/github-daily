@@ -1,4 +1,4 @@
-import type { InterpretationStatus } from "../shared/types";
+import type { InterpretationRun, InterpretationStatus } from "../shared/types";
 
 const SYSTEM_PROMPT = [
   "你是 TrendShift 中文看板的解读生成器。",
@@ -11,7 +11,22 @@ const SYSTEM_PROMPT = [
 
 const MAX_RETRY_COUNT = 3;
 const README_MAX_LENGTH = 3000;
-const MAX_REPOS_PER_RUN = 10;
+
+// 每 10 分钟由 cron 触发一次，每次最多 6 个仓库（约 36 个/小时），避免供应商限流。
+const MAX_REPOS_PER_RUN = 6;
+const RATE_LIMIT_COOLDOWN_MS = 15 * 60 * 1000;
+const LOG_TAG = "interpretation";
+
+class AiRateLimitError extends Error {
+  constructor() {
+    super("AI_HTTP_429");
+    this.name = "AiRateLimitError";
+  }
+}
+
+function log(event: string, fields: Record<string, unknown>): void {
+  console.log(JSON.stringify({ tag: LOG_TAG, event, ...fields }));
+}
 
 function countChars(value: string): number {
   return [...value].length;
@@ -19,7 +34,6 @@ function countChars(value: string): number {
 
 function isValidDescription(desc: string | null): boolean {
   if (!desc || desc.length === 0) return false;
-  // Check for garbage/corruption (mixed scripts that don't make sense)
   if (/[\ud800-\udbff]/.test(desc) && desc.split(/[\ud800-\udbff]/).length > 3) return false;
   return true;
 }
@@ -67,11 +81,10 @@ interface RepoMeta {
 async function fetchReadme(htmlUrl: string): Promise<string | null> {
   try {
     const url = new URL(htmlUrl);
-    const repoPath = url.pathname; // e.g. "/owner/name"
+    const repoPath = url.pathname;
     const rawUrl = `https://raw.githubusercontent.com${repoPath}/main/README.md`;
     const response = await fetch(rawUrl);
     if (!response.ok) {
-      // Try master branch
       const masterUrl = `https://raw.githubusercontent.com${repoPath}/master/README.md`;
       const masterResponse = await fetch(masterUrl);
       if (!masterResponse.ok) return null;
@@ -92,7 +105,7 @@ async function callAi(
   if (!env.AI_API_KEY || !env.AI_BASE_URL || !env.AI_MODEL) {
     throw new Error("AI_NOT_CONFIGURED");
   }
-  
+
   const baseUrl = env.AI_BASE_URL.endsWith("/") ? env.AI_BASE_URL.slice(0, -1) : env.AI_BASE_URL;
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -106,6 +119,7 @@ async function callAi(
       response_format: { type: "json_object" },
     }),
   });
+  if (response.status === 429) throw new AiRateLimitError();
   if (!response.ok) throw new Error(`AI_HTTP_${response.status}`);
   const data = (await response.json()) as {
     choices?: { message?: { content?: string } }[];
@@ -155,21 +169,36 @@ async function repoMeta(db: D1Database, id: string): Promise<RepoMeta | null> {
   return {
     board: row.board,
     language: row.language,
-    tags: JSON.parse(row.tags) as string[],
+    tags: JSON.parse(tagsSafe(row.tags)) as string[],
   };
 }
 
-async function listReposNeedingInterpretation(db: D1Database, limit: number): Promise<RepoSeed[]> {
+function tagsSafe(tags: string | null): string {
+  if (!tags) return "[]";
+  try {
+    JSON.parse(tags);
+    return tags;
+  } catch {
+    return "[]";
+  }
+}
+
+async function listReposNeedingInterpretation(
+  db: D1Database,
+  limit: number,
+  now: string,
+): Promise<RepoSeed[]> {
   const result = await db
     .prepare(
       `SELECT r.id, r.html_url, r.description_en, r.language
        FROM repositories r
        WHERE NOT EXISTS (SELECT 1 FROM interpretations i WHERE i.repo_id = r.id AND i.status = 'done')
        AND NOT EXISTS (SELECT 1 FROM interpretations i WHERE i.repo_id = r.id AND i.status = 'failed' AND i.retry_count >= ?)
+       AND NOT EXISTS (SELECT 1 FROM interpretations i WHERE i.repo_id = r.id AND i.next_attempt_at > ?)
        ORDER BY (SELECT MAX(date) FROM board_entries WHERE repo_id = r.id) DESC, r.id ASC
        LIMIT ?`,
     )
-    .bind(MAX_RETRY_COUNT, limit)
+    .bind(MAX_RETRY_COUNT, now, limit)
     .all<RepoSeed>();
   return result.results;
 }
@@ -182,12 +211,13 @@ function upsertInterpretation(
   status: InterpretationStatus,
   error: string | null,
   retryCount: number,
+  nextAttemptAt: string | null,
 ): Promise<D1Result> {
   const now = new Date().toISOString();
   return db
     .prepare(
-      `INSERT INTO interpretations (repo_id, summary, solves, audience, model, status, error, retry_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO interpretations (repo_id, summary, solves, audience, model, status, error, retry_count, next_attempt_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id) DO UPDATE SET
          summary = excluded.summary,
          solves = excluded.solves,
@@ -196,6 +226,7 @@ function upsertInterpretation(
          status = excluded.status,
          error = excluded.error,
          retry_count = excluded.retry_count,
+         next_attempt_at = excluded.next_attempt_at,
          updated_at = excluded.updated_at`,
     )
     .bind(
@@ -207,6 +238,7 @@ function upsertInterpretation(
       status,
       error,
       retryCount,
+      nextAttemptAt,
       now,
       now,
     )
@@ -219,33 +251,76 @@ export interface InterpretationResult {
   pending: number;
 }
 
-export async function processInterpretationQueue(env: Cloudflare.Env): Promise<InterpretationResult> {
-  // Only process if AI is configured
+async function recordRun(
+  db: D1Database,
+  run: Omit<InterpretationRun, "id">,
+): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO interpretation_runs
+         (started_at, finished_at, trigger, scanned, done, failed, rate_limited, duration_ms, errors)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        run.started_at,
+        run.finished_at,
+        run.trigger,
+        run.scanned,
+        run.done,
+        run.failed,
+        run.rate_limited,
+        run.duration_ms,
+        run.errors,
+      )
+      .run();
+  } catch (error) {
+    log("run_log_failed", { message: error instanceof Error ? error.message : "UNKNOWN" });
+  }
+}
+
+export async function processInterpretationQueue(
+  env: Cloudflare.Env,
+  trigger = "cron",
+): Promise<InterpretationResult> {
+  const startedAtMs = Date.now();
+  const startedAt = new Date(startedAtMs).toISOString();
+
   if (!env.AI_API_KEY || !env.AI_BASE_URL || !env.AI_MODEL) {
+    log("skipped", { trigger, reason: "AI_NOT_CONFIGURED" });
+    await recordRun(env.DB, {
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      trigger,
+      scanned: 0,
+      done: 0,
+      failed: 0,
+      rate_limited: 0,
+      duration_ms: 0,
+      errors: "AI_NOT_CONFIGURED",
+    });
     return { done: 0, failed: 0, pending: 0 };
   }
 
-  const repos = await listReposNeedingInterpretation(env.DB, MAX_REPOS_PER_RUN);
+  const now = new Date().toISOString();
+  const repos = await listReposNeedingInterpretation(env.DB, MAX_REPOS_PER_RUN, now);
+  log("started", { trigger, scanned: repos.length, model: env.AI_MODEL });
+
   let done = 0;
   let failed = 0;
+  let rateLimited = 0;
+  const errors: string[] = [];
 
   for (const repo of repos) {
-    // Check current retry count
     const current = await env.DB
       .prepare("SELECT retry_count, status FROM interpretations WHERE repo_id = ?")
       .bind(repo.id)
       .first<{ retry_count: number; status: string }>();
 
     const retryCount = (current?.retry_count ?? 0) + 1;
-    
-    // If already at max retries and failed, skip
-    if (current?.status === "failed" && retryCount > MAX_RETRY_COUNT) {
-      continue;
-    }
+    if (current?.status === "failed" && retryCount > MAX_RETRY_COUNT) continue;
 
     const meta = await repoMeta(env.DB, repo.id);
-    
-    // Fetch README if description is invalid
     let readmeContent: string | null = null;
     if (!isValidDescription(repo.description_en)) {
       readmeContent = await fetchReadme(repo.html_url);
@@ -256,55 +331,80 @@ export async function processInterpretationQueue(env: Cloudflare.Env): Promise<I
       const content = await callAi(env, messages);
       const parsed = parseInterpretation(content);
       if (!parsed) {
-        await upsertInterpretation(
-          env.DB,
-          repo.id,
-          null,
-          env.AI_MODEL,
-          retryCount >= MAX_RETRY_COUNT ? "failed" : "pending",
-          "INVALID_OR_INCOMPLETE",
-          retryCount,
-        );
-        if (retryCount >= MAX_RETRY_COUNT) failed += 1;
+        const status = retryCount >= MAX_RETRY_COUNT ? "failed" : "pending";
+        await upsertInterpretation(env.DB, repo.id, null, env.AI_MODEL, status, "INVALID_OR_INCOMPLETE", retryCount, null);
+        if (status === "failed") failed += 1;
+        errors.push(`${repo.id}: INVALID_OR_INCOMPLETE`);
+        log("repo", { trigger, repo: repo.id, outcome: status, error: "INVALID_OR_INCOMPLETE", retry_count: retryCount });
         continue;
       }
-      await upsertInterpretation(env.DB, repo.id, parsed, env.AI_MODEL, "done", null, 0);
+      await upsertInterpretation(env.DB, repo.id, parsed, env.AI_MODEL, "done", null, 0, null);
       done += 1;
+      log("repo", { trigger, repo: repo.id, outcome: "done", retry_count: 0 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "UNKNOWN";
-      await upsertInterpretation(
-        env.DB,
-        repo.id,
-        null,
-        env.AI_MODEL,
-        retryCount >= MAX_RETRY_COUNT ? "failed" : "pending",
-        message,
-        retryCount,
-      );
-      if (retryCount >= MAX_RETRY_COUNT) failed += 1;
+      const isRateLimit = error instanceof AiRateLimitError;
+      if (isRateLimit) rateLimited += 1;
+      const status = retryCount >= MAX_RETRY_COUNT ? "failed" : "pending";
+      const nextAttemptAt = isRateLimit
+        ? new Date(Date.now() + RATE_LIMIT_COOLDOWN_MS).toISOString()
+        : null;
+      await upsertInterpretation(env.DB, repo.id, null, env.AI_MODEL, status, message, retryCount, nextAttemptAt);
+      if (status === "failed") failed += 1;
+      errors.push(`${repo.id}: ${message}`);
+      log("repo", {
+        trigger,
+        repo: repo.id,
+        outcome: status,
+        error: message,
+        retry_count: retryCount,
+        next_attempt_at: nextAttemptAt,
+      });
     }
   }
 
-  const pending = await env.DB
+  const pendingRow = await env.DB
     .prepare("SELECT COUNT(*) as count FROM interpretations WHERE status = 'pending'")
     .first<{ count: number }>();
+  const pending = pendingRow?.count ?? 0;
+  const finishedAtMs = Date.now();
 
-  return { done, failed, pending: pending?.count ?? 0 };
+  await recordRun(env.DB, {
+    started_at: startedAt,
+    finished_at: new Date(finishedAtMs).toISOString(),
+    trigger,
+    scanned: repos.length,
+    done,
+    failed,
+    rate_limited: rateLimited,
+    duration_ms: finishedAtMs - startedAtMs,
+    errors: errors.length > 0 ? JSON.stringify(errors.slice(0, 10)) : null,
+  });
+
+  log("finished", { trigger, scanned: repos.length, done, failed, rate_limited: rateLimited, pending, duration_ms: finishedAtMs - startedAtMs });
+  return { done, failed, pending };
 }
 
 export async function retryFailedInterpretations(env: Cloudflare.Env): Promise<InterpretationResult> {
-  // Reset failed interpretations to pending for retry
   const now = new Date().toISOString();
   await env.DB
     .prepare(
-      `UPDATE interpretations 
-       SET status = 'pending', retry_count = 0, updated_at = ?
-       WHERE status = 'failed' AND retry_count >= ?`,
+      `UPDATE interpretations
+       SET status = 'pending', retry_count = 0, error = NULL, next_attempt_at = NULL, updated_at = ?
+       WHERE status = 'failed'`,
     )
-    .bind(now, MAX_RETRY_COUNT)
+    .bind(now)
     .run();
+  log("retry_reset", { trigger: "retry", at: now });
+  return processInterpretationQueue(env, "retry");
+}
 
-  return processInterpretationQueue(env);
+export async function listInterpretationRuns(db: D1Database, limit = 20): Promise<InterpretationRun[]> {
+  const result = await db
+    .prepare("SELECT * FROM interpretation_runs ORDER BY id DESC LIMIT ?")
+    .bind(limit)
+    .all<InterpretationRun>();
+  return result.results;
 }
 
 export async function countPendingInterpretations(db: D1Database): Promise<number> {

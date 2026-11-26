@@ -152,15 +152,17 @@ npm run deploy:dry-run
 
 ```toml
 [triggers]
-crons = ["10 0 * * *", "*/1 * * * *"]
+crons = ["10 0 * * *", "*/10 * * * *"]
 ```
 
 | 任务 | Cron | 说明 |
 | --- | --- | --- |
 | 每日采集 | `10 0 * * *` | UTC 00:10（北京时间 08:10）抓六个榜单 |
-| 解读队列 | `*/1 * * * *` | 每分钟最多处理 10 个仓库 |
+| 解读队列 | `*/10 * * * *` | 每 10 分钟最多处理 6 个仓库（约 36 个/小时），避免供应商限流 |
 
-部署后在 Cloudflare Dashboard → Workers & Pages → 你的 Worker → Triggers 中确认两条 cron 出现。Worker 的 `scheduled()` 处理器会在每日 00:10 额外触发采集，其余分钟只处理解读队列。
+部署后在 Cloudflare Dashboard → Workers & Pages → 你的 Worker → Triggers 中确认两条 cron 出现。`scheduled()` 用 `event.cron` 区分来源：只有每日那条执行采集，两条都会跑解读队列；同一分钟重叠不会重复采集。
+
+AI 供应商返回 `429` 时，该仓库会进入 **15 分钟退避**（写入 `next_attempt_at`），期间不会被重复调用；累计失败 3 次才标记为 `failed`。这样即使限流也不会把重试次数一次性耗尽。
 
 ---
 
@@ -179,7 +181,7 @@ curl -X POST https://trendshift-daily-wall.<你的子域>.workers.dev/api/admin/
 { "date": "2026-11-18", "count": 150, "warnings": [] }
 ```
 
-随后分钟级任务会自动补齐三段解读，100+ 个仓库大约需要 10–15 分钟。查看进度：
+随后定时任务会自动补齐三段解读；按每 10 分钟 6 个计算，150 个仓库约需 4 小时。也可以直接点页面右上角「运维」面板手动跑一批。查看进度：
 
 ```bash
 curl https://trendshift-daily-wall.<你的子域>.workers.dev/api/admin/status \
@@ -214,6 +216,29 @@ curl.exe -X POST "$BASE/api/admin/interpretations/retry" -H "Authorization: Bear
 curl.exe "$BASE/api/admin/status" -H "Authorization: Bearer $TOKEN"
 ```
 
+### 页面运维面板
+
+看板右上角「运维」按钮可打开一个需要 `ADMIN_TOKEN` 的面板，提供：
+
+- 立即采集、跑一批解读（6 个）、重跑失败解读、刷新状态；
+- 显示待解读数量和最近 20 次运行记录（来源、扫描/完成/失败/限流数、耗时）。
+
+令牌只存在当前页面内存中，不写入 `localStorage`。匿名访客看不到写操作入口，符合项目约束。
+
+也可以通过接口拿运行日志（需要 `ADMIN_TOKEN`）：
+
+```powershell
+curl.exe "$BASE/api/admin/interpretation-runs" -H "Authorization: Bearer $TOKEN"
+```
+
+Worker 运行时还会输出结构化日志（用 Cloudflare Dashboard 的 Real-time Logs 或 `npx wrangler tail` 查看）：
+
+```text
+{"tag":"interpretation","event":"started","trigger":"manual","scanned":6,"model":"..."}
+{"tag":"interpretation","event":"repo","trigger":"manual","repo":"owner/repo","outcome":"done","retry_count":0}
+{"tag":"interpretation","event":"finished","trigger":"manual","scanned":6,"done":5,"failed":0,"rate_limited":1,"pending":120,"duration_ms":4321}
+```
+
 ### D1 查询
 
 ```bash
@@ -225,6 +250,12 @@ npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT date, C
 
 # 解读进度：done / pending / failed 各多少，最后更新时间
 npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT status, COUNT(*) AS n, MAX(updated_at) AS last FROM interpretations GROUP BY status"
+
+# 最近 10 次解读运行记录
+npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT trigger, started_at, scanned, done, failed, rate_limited, duration_ms FROM interpretation_runs ORDER BY id DESC LIMIT 10"
+
+# 正在退避中的仓库（AI_HTTP_429 后 15 分钟内不会再调用）
+npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT repo_id, retry_count, next_attempt_at FROM interpretations WHERE datetime(next_attempt_at) > datetime('now') LIMIT 10"
 
 # 失败原因样本（401 是 Key 错、404 多半是 AI_BASE_URL 多写了 /chat/completions）
 npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT repo_id, status, substr(error,1,80) AS err FROM interpretations WHERE error IS NOT NULL LIMIT 10"
@@ -253,5 +284,6 @@ npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT r.id AS
 | 采集返回 `502 RSC_PAYLOAD_MISSING` | TrendShift 页面结构变化或被限流；该榜沿用上一期次，查看 `warnings` 和源站可用性 |
 | 定时任务没执行 | 在 Dashboard → Triggers 确认 cron 存在；Cron 使用 UTC，不是北京时间 |
 | 部分仓库有中文、部分还是英文 | 队列按仓库名每分钟最多 10 个推进，未轮到的显示英文；手动多跑几次 `process`，或用 D1 查询确认顺序 |
-| 解读一直“生成中”或 `process` 返回全 0 | 未配置 `AI_*`、库里无数据或额度不足；用 `/api/admin/status` 和 D1 的 `GROUP BY status` / `error` 查询定位 |
+| 解读一直“生成中”或 `process` 返回全 0 | 未配置 `AI_*`、库里无数据或处于 429 退避期；用 `/api/admin/status`、`/api/admin/interpretation-runs` 和 D1 的 `GROUP BY status` / `error` 查询定位 |
+| 大量 `AI_HTTP_429`、`解读暂缺` | 这是供应商限流，旧版本每分钟 10 个太激进；新版本已改为每 10 分钟 6 个 + 15 分钟退避，升级后点「重跑失败解读」重置旧失败项 |
 | `wrangler` 命令找不到 | 用 `npx wrangler ...`，或 `npm install -g wrangler`（不是 `@cloudflare/wrangler`） |

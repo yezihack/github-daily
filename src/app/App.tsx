@@ -8,6 +8,7 @@ import {
 } from "../shared/format";
 import type { BoardEntryResponse, BoardsResponse } from "../shared/types";
 import { DetailDrawer } from "./Drawer";
+import { AdminPanel } from "./AdminPanel";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -171,6 +172,7 @@ export function App() {
     null,
   );
   const [viewBookmarksOnly, setViewBookmarksOnly] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [bookmarkedEntries, setBookmarkedEntries] = useState<BoardEntryResponse[]>([]);
   const { bookmarks, toggle } = useBookmarks();
 
@@ -289,6 +291,16 @@ export function App() {
             </label>
           </div>
           <div className="topbar__slot">
+            <button
+              type="button"
+              className="topbar__admin"
+              onClick={() => setShowAdmin((visible) => !visible)}
+              aria-expanded={showAdmin}
+            >
+              运维
+            </button>
+          </div>
+          <div className="topbar__slot">
             <span className="topbar__label">数据状态</span>
             <span className="topbar__value topbar__value--pending">待接入</span>
           </div>
@@ -374,6 +386,15 @@ export function App() {
             />
           ))}
         </div>
+      )}
+
+      {showAdmin && (
+        <AdminPanel
+          onClose={() => setShowAdmin(false)}
+          onDataChanged={() => {
+            void load();
+          }}
+        />
       )}
 
       {selected && (

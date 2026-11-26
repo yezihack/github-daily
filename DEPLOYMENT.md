@@ -191,26 +191,55 @@ curl https://trendshift-daily-wall.<你的子域>.workers.dev/api/admin/status \
 
 ## 四、日常运维
 
-```bash
-BASE=https://trendshift-daily-wall.<你的子域>.workers.dev
-TOKEN=<ADMIN_TOKEN>
+在 PowerShell 中 `curl` 命令请写成**单行**（`\` 不是续行符，会被当成另一个 URL 传给 curl，导致 `Proxy CONNECT aborted`），并用 `curl.exe` 避免别名问题。
 
-# 公开看板数据
-curl "$BASE/api/boards"
-curl "$BASE/api/boards?date=2026-11-18"
-
-# 手动跑一次解读队列 / 重跑失败解读
-curl -X POST "$BASE/api/admin/interpretations/process" -H "Authorization: Bearer $TOKEN"
-curl -X POST "$BASE/api/admin/interpretations/retry"    -H "Authorization: Bearer $TOKEN"
-
-# 查看 D1 中的数据量
-npx wrangler d1 execute trendshift-daily-wall --remote \
-  --command "SELECT date, COUNT(*) AS n FROM board_entries GROUP BY date ORDER BY date DESC LIMIT 5"
+```powershell
+$BASE = "https://trendshift-daily-wall.<你的子域>.workers.dev"
+$TOKEN = "<ADMIN_TOKEN>"
 ```
 
-公开读取接口带缓存头：最新期次 5 分钟，历史期次 1 天。修改 Secret 后新版本会自动生效；必要时重跑 `npm run deploy`。
+### 常用接口
 
-回滚：Dashboard → Worker → Deployments → 选择历史版本 → Rollback。
+```powershell
+# 公开看板数据（不需要 token）
+curl.exe "$BASE/api/boards"
+curl.exe "$BASE/api/boards?date=2026-11-18"
+
+# 采集 / 跑一批解读 / 重跑失败解读（每次队列最多 10 个仓库）
+curl.exe -X POST "$BASE/api/admin/ingest" -H "Authorization: Bearer $TOKEN"
+curl.exe -X POST "$BASE/api/admin/interpretations/process" -H "Authorization: Bearer $TOKEN"
+curl.exe -X POST "$BASE/api/admin/interpretations/retry" -H "Authorization: Bearer $TOKEN"
+
+# 待解读数量
+curl.exe "$BASE/api/admin/status" -H "Authorization: Bearer $TOKEN"
+```
+
+### D1 查询
+
+```bash
+# 四张表的行数：判断冷启动是否完成、是否采集过
+npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT (SELECT COUNT(*) FROM editions) AS editions, (SELECT COUNT(*) FROM board_entries) AS entries, (SELECT COUNT(*) FROM repositories) AS repos, (SELECT COUNT(*) FROM interpretations) AS interpretations"
+
+# 各期次条目数
+npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT date, COUNT(*) AS n FROM board_entries GROUP BY date ORDER BY date DESC LIMIT 5"
+
+# 解读进度：done / pending / failed 各多少，最后更新时间
+npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT status, COUNT(*) AS n, MAX(updated_at) AS last FROM interpretations GROUP BY status"
+
+# 失败原因样本（401 是 Key 错、404 多半是 AI_BASE_URL 多写了 /chat/completions）
+npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT repo_id, status, substr(error,1,80) AS err FROM interpretations WHERE error IS NOT NULL LIMIT 10"
+
+# 队列中接下来要处理的仓库（按实际处理顺序）
+npx wrangler d1 execute trendshift-daily-wall --remote --command "SELECT r.id AS repo, b.date, b.tags FROM repositories r JOIN board_entries b ON b.repo_id=r.id WHERE NOT EXISTS (SELECT 1 FROM interpretations i WHERE i.repo_id=r.id AND i.status='done') AND b.date=(SELECT MAX(date) FROM board_entries WHERE repo_id=r.id) ORDER BY b.date DESC, r.id ASC LIMIT 12"
+```
+
+### 解读队列说明
+
+- 卡片只在 `status=done` 时显示中文摘要；否则显示英文简介 + 「待生成」角标。中文三段全文要点开条目右侧抽屉查看。
+- cron 每分钟最多处理 10 个仓库，按仓库名顺序推进；120+ 个仓库约需 10–15 分钟补齐。想立刻推进就多执行几次 `process`（注意 AI 限流与费用）。
+- `process` 返回全 0 通常有两种原因：库里还没有采集数据，或三个 `AI_*` Secret 没设全。先用上面的行数查询确认数据存在。
+- 公开读取接口带缓存头：最新期次 5 分钟，历史期次 1 天。修改 Secret 后新版本会自动生效；必要时重跑 `npm run deploy`。
+- 回滚：Dashboard → Worker → Deployments → 选择历史版本 → Rollback。
 
 ---
 
@@ -219,9 +248,10 @@ npx wrangler d1 execute trendshift-daily-wall --remote \
 | 现象 | 原因与处理 |
 | --- | --- |
 | 管理接口返回 `401 {"error":"UNAUTHORIZED"}` | `Authorization` 必须是 `Bearer <ADMIN_TOKEN>`，且 Secret 已设置；检查是否误加了 `--env production` 导致 Secret 放错环境 |
-| 部署后所有 API 报数据库错误 | `wrangler.toml` 的 `database_id` 还是占位符，或没执行 `--remote` 迁移 |
-| 首页空白 | 新库无数据，执行“冷启动”的采集命令 |
+| 部署后所有 API 报数据库错误 / `500 error code 1101` | `wrangler.toml` 的 D1 绑定名必须是 `DB`（代码用 `env.DB`）、`database_id` 已替换为真实 ID，且执行过 `--remote` 迁移 |
+| 首页空白 | 新库无数据，执行“冷启动”的采集命令；用四张表行数查询确认 |
 | 采集返回 `502 RSC_PAYLOAD_MISSING` | TrendShift 页面结构变化或被限流；该榜沿用上一期次，查看 `warnings` 和源站可用性 |
 | 定时任务没执行 | 在 Dashboard → Triggers 确认 cron 存在；Cron 使用 UTC，不是北京时间 |
-| 解读一直“生成中” | 未配置 `AI_*` 或额度不足；用 `/api/admin/status` 看 pending 数量 |
+| 部分仓库有中文、部分还是英文 | 队列按仓库名每分钟最多 10 个推进，未轮到的显示英文；手动多跑几次 `process`，或用 D1 查询确认顺序 |
+| 解读一直“生成中”或 `process` 返回全 0 | 未配置 `AI_*`、库里无数据或额度不足；用 `/api/admin/status` 和 D1 的 `GROUP BY status` / `error` 查询定位 |
 | `wrangler` 命令找不到 | 用 `npx wrangler ...`，或 `npm install -g wrangler`（不是 `@cloudflare/wrangler`） |
